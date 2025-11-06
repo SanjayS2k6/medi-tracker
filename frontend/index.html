@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MedTrack Pro</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style> body { background:#f7fafc; } .card-hero { background: linear-gradient(90deg,#4f46e5,#06b6d4); color:white; border-radius:12px; padding:20px; } .small-muted { color:#6b7280; } .expiry-soon { border-left:4px solid #f97316; } </style>
+</head>
+<body>
+  <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm">
+    <div class="container">
+      <a class="navbar-brand" href="#">MedTrack Pro</a>
+      <div>
+        <button class="btn btn-outline-primary me-2" id="btnLogin">Login</button>
+        <button class="btn btn-primary" id="btnRegister">Register</button>
+      </div>
+    </div>
+  </nav>
+  <main class="container my-4">
+    <div class="row g-4">
+      <div class="col-12 col-md-8">
+        <div class="card p-3">
+          <div class="d-flex justify-content-between">
+            <h3>Medicines</h3>
+            <div>
+              <button class="btn btn-success" id="btnAddMed">Add Medicine</button>
+              <button class="btn btn-secondary" id="btnRefresh">Refresh</button>
+            </div>
+          </div>
+          <div id="medList" class="mt-3"></div>
+        </div>
+      </div>
+      <div class="col-12 col-md-4">
+        <div class="card card-hero p-3 shadow-sm">
+          <h4>Quick Actions</h4>
+          <p class="small-muted">Keep your inventory healthy</p>
+          <button class="btn btn-light w-100 mb-2" id="viewAlerts">View Alerts</button>
+          <button class="btn btn-light w-100" id="viewRedis">View Redistributions</button>
+        </div>
+        <div class="card mt-3 p-3">
+          <h5>Alerts (nearing expiry)</h5>
+          <div id="alerts" class="mt-2"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <!-- Modals -->
+  <div class="modal fade" id="modalAuth" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header"><h5 id="modalAuthTitle"></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <form id="authForm">
+            <div class="mb-3"><label>Name (register only)</label><input id="authName" class="form-control" /></div>
+            <div class="mb-3"><label>Email</label><input id="authEmail" class="form-control" /></div>
+            <div class="mb-3"><label>Password</label><input id="authPass" type="password" class="form-control" /></div>
+            <div class="mb-3"><label>Role</label><select id="authRole" class="form-select"><option value="pharmacist">Pharmacist</option><option value="chw">CHW</option></select></div>
+            <div class="text-end"><button class="btn btn-primary" id="authSubmit">Submit</button></div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal fade" id="modalAddMed" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header"><h5>Add Medicine</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <form id="medForm">
+            <div class="mb-3"><label>Name</label><input id="mName" class="form-control" required/></div>
+            <div class="mb-3"><label>Batch</label><input id="mBatch" class="form-control"/></div>
+            <div class="mb-3"><label>Quantity</label><input id="mQty" type="number" value="1" class="form-control"/></div>
+            <div class="mb-3"><label>Expiry Date</label><input id="mExpiry" type="date" class="form-control" required/></div>
+            <div class="mb-3"><label>Notes</label><textarea id="mNotes" class="form-control"></textarea></div>
+            <div class="text-end"><button class="btn btn-success">Save</button></div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    const API = (p, opts)=> fetch((localStorage.getItem('API_BASE') || 'http://localhost:4000') + p, opts).then(async r=> r.json());
+    let token = localStorage.getItem('mt_token') || null;
+    const modalAuth = new bootstrap.Modal(document.getElementById('modalAuth'));
+    const modalAddMed = new bootstrap.Modal(document.getElementById('modalAddMed'));
+    document.getElementById('btnLogin').onclick = ()=> openAuth('login');
+    document.getElementById('btnRegister').onclick = ()=> openAuth('register');
+    document.getElementById('btnAddMed').onclick = ()=> modalAddMed.show();
+    document.getElementById('btnRefresh').onclick = ()=> loadMeds();
+    document.getElementById('viewAlerts').onclick = ()=> loadAlerts();
+    document.getElementById('viewRedis').onclick = ()=> loadRedis();
+    function openAuth(mode){
+      document.getElementById('modalAuthTitle').innerText = mode==='login'? 'Login' : 'Register';
+      document.getElementById('authName').style.display = mode==='login'? 'none' : 'block';
+      document.getElementById('authRole').style.display = mode==='login'? 'none' : 'block';
+      document.getElementById('authSubmit').onclick = async (e)=>{
+        e.preventDefault();
+        const name = document.getElementById('authName').value;
+        const email = document.getElementById('authEmail').value;
+        const password = document.getElementById('authPass').value;
+        const role = document.getElementById('authRole').value;
+        try{
+          if(mode==='register'){
+            const res = await API('/auth/register', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name,email,password,role})});
+            if(res.error) return alert(res.error);
+            alert('Registered. Please Login.');
+            modalAuth.hide();
+          }else{
+            const res = await API('/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email,password})});
+            if(res.error) return alert(res.error);
+            token = res.token; localStorage.setItem('mt_token', token);
+            localStorage.setItem('mt_user', JSON.stringify(res.user));
+            modalAuth.hide(); loadMeds(); loadAlerts();
+          }
+        }catch(e){ alert('Network error'); }
+      };
+      modalAuth.show();
+    }
+    document.getElementById('medForm').onsubmit = async (e)=>{
+      e.preventDefault();
+      const payload = {
+        name: document.getElementById('mName').value,
+        batch: document.getElementById('mBatch').value,
+        quantity: Number(document.getElementById('mQty').value),
+        expiryDate: document.getElementById('mExpiry').value,
+        notes: document.getElementById('mNotes').value
+      };
+      const res = await fetch((localStorage.getItem('API_BASE')||'http://localhost:4000')+'/api/medicines', { method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token}, body: JSON.stringify(payload)});
+      const data = await res.json();
+      if(data.error) return alert(data.error);
+      modalAddMed.hide();
+      loadMeds(); loadAlerts();
+    };
+    async function loadMeds(){
+      try{
+        const res = await fetch((localStorage.getItem('API_BASE')||'http://localhost:4000')+'/api/medicines', { headers: { 'Authorization': 'Bearer '+token } });
+        const meds = await res.json();
+        const el = document.getElementById('medList');
+        if(meds.error) return el.innerHTML = '<div class="alert alert-warning">Please login to view medicines.</div>';
+        if(meds.length===0) return el.innerHTML = '<p class="small-muted">No medicines yet</p>';
+        el.innerHTML = meds.map(m=>`
+          <div class="card mb-2 ${new Date(m.expiryDate) - new Date() < 14*24*60*60*1000 ? 'expiry-soon' : ''}">
+            <div class="card-body d-flex justify-content-between align-items-start">
+              <div>
+                <h5>${m.name} <small class="text-muted"> (batch: ${m.batch||'-'})</small></h5>
+                <p class="mb-0 small-muted">Qty: ${m.quantity} • Expiry: ${new Date(m.expiryDate).toLocaleDateString()}</p>
+                <p class="mb-0">${m.notes||''}</p>
+              </div>
+              <div class="text-end">
+                <button class="btn btn-sm btn-danger" onclick="deleteMed('${m._id}')">Delete</button>
+              </div>
+            </div>
+          </div>
+        `).join('');
+      }catch(e){ console.error(e); }
+    }
+    async function deleteMed(id){ if(!confirm('Delete medicine?')) return; const res = await fetch((localStorage.getItem('API_BASE')||'http://localhost:4000')+'/api/medicines/'+id, { method:'DELETE', headers:{ 'Authorization':'Bearer '+token } }); const data = await res.json(); if(data.error) return alert(data.error); loadMeds(); loadAlerts(); }
+    async function loadAlerts(){ try{ const res = await fetch((localStorage.getItem('API_BASE')||'http://localhost:4000')+'/api/alerts', { headers:{ 'Authorization':'Bearer '+token } }); const list = await res.json(); const el = document.getElementById('alerts'); if(list.error) return el.innerHTML = '<div class="small-muted">Login to view alerts</div>'; if(list.length===0) return el.innerHTML = '<div class="small-muted">No alerts</div>'; el.innerHTML = list.map(l=>`<div class="mb-2"><strong>${l.name}</strong> — Expires ${new Date(l.expiryDate).toLocaleDateString()}</div>`).join(''); }catch(e){ console.error(e); } }
+    async function loadRedis(){ const res = await fetch((localStorage.getItem('API_BASE')||'http://localhost:4000')+'/api/redistributions', { headers:{ 'Authorization':'Bearer '+token } }); const data = await res.json(); if(data.error) return alert(data.error); alert('Open console to view redistributions (for PoC)'); console.log(data); }
+    if(token) { loadMeds(); loadAlerts(); }
+  </script>
+</body>
+</html>
+
+cdgit add .
